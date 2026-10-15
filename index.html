@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>فاحص استجابة المواقع</title>
+<style>
+body {
+    font-family: Arial, sans-serif;
+    background: #f3f5f9;
+    color: #172033;
+    padding: 20px;
+    max-width: 650px;
+    margin: auto;
+}
+h2 {
+    text-align: center;
+}
+label {
+    display: block;
+    margin-top: 15px;
+    font-weight: bold;
+}
+input, select, button {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 12px;
+    margin-top: 7px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+    font-size: 16px;
+}
+button {
+    background: #1457c5;
+    color: white;
+    border: none;
+    margin-top: 15px;
+    cursor: pointer;
+}
+button:disabled {
+    opacity: 0.5;
+}
+#stop {
+    background: #555;
+}
+.result {
+    background: white;
+    padding: 12px;
+    margin-top: 10px;
+    border-radius: 8px;
+    overflow-wrap: anywhere;
+}
+.success {
+    color: green;
+}
+.warning {
+    color: #a66a00;
+}
+.error {
+    color: red;
+}
+</style>
+</head>
+<body>
+
+<h2>فاحص استجابة المواقع</h2>
+
+<label for="website">رابط الموقع</label>
+<input id="website" type="url" placeholder="" required>
+
+<label for="requests">عدد الطلبات</label>
+<select id="requests">
+    <option value="1">1</option>
+    <option value="3">3</option>
+    <option value="5" selected>5</option>
+    <option value="10">10</option>
+</select>
+
+<label for="interval">الفاصل الزمني بين الطلبات</label>
+<select id="interval">
+    <option value="1000">1 ثانية</option>
+    <option value="2000" selected>ثانيتان</option>
+    <option value="5000">5 ثوانٍ</option>
+</select>
+
+<button id="start">بدء الاختبار</button>
+<button id="stop" disabled>إيقاف الاختبار</button>
+
+<h3>النتائج</h3>
+<div id="summary"></div>
+<div id="results"></div>
+
+<script>
+const website = document.getElementById("website");
+const requests = document.getElementById("requests");
+const interval = document.getElementById("interval");
+const start = document.getElementById("start");
+const stop = document.getElementById("stop");
+const summary = document.getElementById("summary");
+const results = document.getElementById("results");
+
+let running = false;
+let stopRequested = false;
+let completed = 0;
+let successful = 0;
+let limited = 0;
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function addResult(message, type) {
+    const item = document.createElement("div");
+    item.className = "result " + type;
+    item.textContent = message;
+    results.prepend(item);
+}
+
+function updateSummary() {
+    summary.textContent =
+        "الطلبات المنفذة: " + completed +
+        " | الاستجابات الناجحة: " + successful +
+        " | استجابات 429: " + limited;
+}
+
+start.addEventListener("click", async () => {
+    if (running) return;
+
+    let url;
+
+    try {
+        url = new URL(website.value.trim());
+
+        if (!["http:", "https:"].includes(url.protocol)) {
+            throw new Error();
+        }
+    } catch {
+        addResult("أدخل رابطًا صحيحًا يبدأ بـ https:// أو http://", "error");
+        return;
+    }
+
+    running = true;
+    stopRequested = false;
+    completed = 0;
+    successful = 0;
+    limited = 0;
+    results.replaceChildren();
+    updateSummary();
+
+    start.disabled = true;
+    stop.disabled = false;
+
+    const total = Number(requests.value);
+    const delay = Number(interval.value);
+
+    for (let i = 1; i <= total; i++) {
+        if (stopRequested) break;
+
+        try {
+            const response = await fetch(url.href, {
+                method: "GET",
+                mode: "cors",
+                cache: "no-store",
+                signal: AbortSignal.timeout(10000)
+            });
+
+            completed++;
+
+            if (response.status >= 200 && response.status < 300) {
+                successful++;
+            }
+
+            if (response.status === 429) {
+                limited++;
+
+                const retryAfter = response.headers.get("Retry-After");
+
+                addResult(
+                    "الطلب " + i + ": 429 Too Many Requests" +
+                    (retryAfter ? " — Retry-After: " + retryAfter : ""),
+                    "warning"
+                );
+
+                stopRequested = true;
+            } else {
+                addResult(
+                    "الطلب " + i + ": " +
+                    response.status + " " + response.statusText,
+                    response.ok ? "success" : "error"
+                );
+            }
+
+        } catch {
+            completed++;
+
+            addResult(
+                "الطلب " + i +
+                ": تعذرت قراءة الاستجابة. قد يمنع المتصفح الوصول إليها بسبب CORS أو مشكلة اتصال.",
+                "warning"
+            );
+        }
+
+        updateSummary();
+
+        if (i < total && !stopRequested) {
+            await sleep(delay);
+        }
+    }
+
+    running = false;
+    start.disabled = false;
+    stop.disabled = true;
+});
+
+stop.addEventListener("click", () => {
+    stopRequested = true;
+});
+</script>
+
+</body>
+</html>
